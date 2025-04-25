@@ -101,9 +101,17 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self';");
     <input type="text" id="key" placeholder="kavernxyz">
     <input type="number" id="concurrents" placeholder="2">
     <select id="method">
-        <option value="H2-FLOOD">H2-FLOOD</option>
-        <option value="UDP-RAW">UDP-RAW</option>
-        <option value="TCP-KILL">TCP-KILL</option>
+        <option value="TLS">TLS</option>
+        <option value="VFLOOD">VFLOOD</option>
+        <option value="MIXBILL">MIXBILL</option>
+        <option value="HTTPS">HTTPS</option>
+        <option value="H2-FURY">H2-FURY</option>
+        <option value="H2-JOUMA">H2-JOUMA</option>
+        <option value="VERN-B">VERN-B</option>
+        <option value="H2-VERN">H2-VERN</option>
+        <option value="BROWSER">BROWSER</option>
+        <option value="UDP">UDP</option>
+        <option value="TCP">TCP</option>
     </select>
     <button onclick="startAttack()">Confirm</button>
     <div class="attack-info" id="attackInfo"></div>
