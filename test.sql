@@ -1,13 +1,14 @@
--- Buat database & tabel
 CREATE DATABASE IF NOT EXISTS stresser_db;
 USE stresser_db;
 
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  apikey VARCHAR(255) NOT NULL UNIQUE,
+  api_key VARCHAR(255) NOT NULL UNIQUE,
   maxtime INT NOT NULL DEFAULT 60,
   concurrents INT NOT NULL DEFAULT 1,
-  expiry DATETIME NOT NULL
+  expiry DATETIME NOT NULL,
+  ip_address VARCHAR(255) DEFAULT NULL
+    COMMENT 'Whitelist IP, comma‐separated; NULL = semua IP'
 );
 
 CREATE TABLE IF NOT EXISTS apis (
@@ -35,13 +36,12 @@ CREATE TABLE IF NOT EXISTS blacklist (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Dummy data
-INSERT INTO users (apikey, maxtime, concurrents, expiry) VALUES
-('user123key', 300, 5, '2025-12-31 23:59:59'),
-('expiredKey', 300, 5, '2020-01-01 00:00:00');
+INSERT INTO users (api_key, maxtime, concurrents, expiry, ip_address) VALUES
+('user123key', 300, 5, '2025-12-31 23:59:59', '192.168.1.10,10.0.0.5'),
+('openkey', 120, 3, '2025-12-31 23:59:59', NULL);
 
 INSERT INTO apis (apiurl) VALUES
-('http://127.0.0.1/api.php?host={host}&port={port}&time={time}&method={method}');
+('http://vernitiger.net/api.php?host={host}&port={port}&time={time}&method={method}');
 
 INSERT INTO blacklist (host, reason) VALUES
 ('bad.example.com', 'Malicious target');
